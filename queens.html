@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Queens</title>
+<link rel="stylesheet" href="assets/shared.css">
+<style>
+  .qgrid { display: grid; width: 100%; aspect-ratio: 1; border: 2px solid #111; border-radius: 6px; overflow: hidden; background: #fff; }
+  /* Cells are locked to equal fractions of the board (minmax(0,1fr)) and their contents are
+     absolutely positioned, so adding a crown or ✕ can never change a cell's size. */
+  .qc { position: relative; min-width: 0; min-height: 0; overflow: hidden; cursor: pointer; color: #222; }
+  .qc svg { position: absolute; left: 15%; top: 15%; width: 70%; height: 70%; color: #111; }
+  .qc .x { position: absolute; inset: 0; display: grid; place-items: center; font-weight: 600; opacity: .55; line-height: 1; font-size: clamp(14px, 5vw, 22px); }
+  .qc.bad::after { content: ""; position: absolute; inset: 0; pointer-events: none;
+    background: repeating-linear-gradient(45deg, rgba(204,16,22,.55) 0 3px, transparent 3px 8px); }
+  .qc.bad svg { color: var(--bad); }
+  .qc svg { color: #6b1d3a; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div id="topbar"></div>
+  <main class="main">
+    <p class="instr">One crown per row, column and colour. Crowns can't touch.</p>
+    <div class="boardbox"><div id="board" class="qgrid noselect"></div></div>
+    <div class="toolbar"><button class="btn ghost" id="undo">Undo</button><button class="btn ghost" id="clear">Clear</button></div>
+  </main>
+</div>
+<script src="assets/theme.js"></script>
+<script src="assets/shared.js"></script>
+<script>
+(function () {
+  var P = GP.T.puzzles, REG = P.queens.regions, COL = P.queensColors, N = REG.length;
+  var g = GP.init('queens');
+  var st = [], hist = [], cells = [];
+  for (var r = 0; r < N; r++) { st.push(new Array(N).fill(0)); }   // 0 empty, 1 mark, 2 crown
+
+  var board = document.getElementById('board');
+  board.style.gridTemplateColumns = 'repeat(' + N + ', minmax(0, 1fr))';
+  board.style.gridTemplateRows = 'repeat(' + N + ', minmax(0, 1fr))';
+  for (r = 0; r < N; r++) for (var c = 0; c < N; c++) {
+    var d = document.createElement('div');
+    d.className = 'qc'; d.style.background = COL[REG[r][c]];
+    var thick = '2px solid #111', thin = '1px solid rgba(0,0,0,.22)';
+    d.style.borderTop = (r === 0 || REG[r-1][c] !== REG[r][c]) ? thick : thin;
+    d.style.borderLeft = (c === 0 || REG[r][c-1] !== REG[r][c]) ? thick : thin;
+    d.style.borderRight = (c === N-1 || REG[r][c+1] !== REG[r][c]) ? thick : thin;
+    d.style.borderBottom = (r === N-1 || REG[r+1][c] !== REG[r][c]) ? thick : thin;
+    d.dataset.r = r; d.dataset.c = c;
+    board.appendChild(d); cells.push(d);
+  }
+
+  function conflicts() {
+    var q = [], bad = {};
+    for (var r = 0; r < N; r++) for (var c = 0; c < N; c++) if (st[r][c] === 2) q.push([r, c]);
+    q.forEach(function (a, i) {
+      q.forEach(function (b, j) {
+        if (i === j) return;
+        var same = a[0] === b[0] || a[1] === b[1] || REG[a[0]][a[1]] === REG[b[0]][b[1]];
+        var touch = Math.abs(a[0] - b[0]) <= 1 && Math.abs(a[1] - b[1]) <= 1;
+        if (same || touch) { bad[a[0] + ',' + a[1]] = true; }
+      });
+    });
+    return { q: q, bad: bad };
+  }
+
+  function render() {
+    var res = conflicts();
+    cells.forEach(function (d) {
+      var r = +d.dataset.r, c = +d.dataset.c, v = st[r][c];
+      d.innerHTML = v === 2 ? GP.CROWN : v === 1 ? '<span class="x">✕</span>' : '';
+      d.classList.toggle('bad', !!res.bad[r + ',' + c]);
+    });
+    if (res.q.length === N && Object.keys(res.bad).length === 0) g.win();
+  }
+
+  board.addEventListener('click', function (e) {
+    if (!g.started || g.done) return;
+    var d = e.target.closest('.qc'); if (!d) return;
+    var r = +d.dataset.r, c = +d.dataset.c;
+    hist.push(JSON.stringify(st));
+    st[r][c] = (st[r][c] + 1) % 3;
+    render();
+  });
+  document.getElementById('undo').onclick = function () {
+    if (g.done || !hist.length) return; st = JSON.parse(hist.pop()); render();
+  };
+  document.getElementById('clear').onclick = function () {
+    if (g.done) return; hist.push(JSON.stringify(st));
+    st = st.map(function (row) { return row.map(function () { return 0; }); }); render();
+  };
+  render();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Zip</title>
+<link rel="stylesheet" href="assets/shared.css">
+<style>
+  .zwrap { position: relative; width: 100%; aspect-ratio: 1; touch-action: none; border-radius: 10px; overflow: hidden; border: 2px solid #111; background: #fff; }
+  .zgrid { position: absolute; inset: 0; display: grid; }
+  .zc { border: 1px solid #e3e1dd; background: #fbfaf8; transition: background .12s; }
+  .zc.on { background: var(--accentSoft); }
+  .zsvg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .meter { margin: 12px auto 0; max-width: 440px; font-size: 13px; color: var(--muted); text-align: center; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div id="topbar"></div>
+  <main class="main">
+    <p class="instr">Drag from 1 through every number in order, covering every square.</p>
+    <div class="boardbox">
+      <div class="zwrap noselect" id="wrap">
+        <div class="zgrid" id="grid"></div>
+        <svg class="zsvg" id="svg" xmlns="http://www.w3.org/2000/svg"></svg>
+      </div>
+    </div>
+    <div class="meter" id="meter"></div>
+    <div class="toolbar"><button class="btn ghost" id="undo">Undo</button><button class="btn ghost" id="clear">Reset</button></div>
+  </main>
+</div>
+<script src="assets/theme.js"></script>
+<script src="assets/shared.js"></script>
+<script>
+(function () {
+  var P = GP.T.puzzles.zip, N = P.size, TOTAL = N * N;
+  var g = GP.init('zip');
+  var nums = {}, maxNum = 0;
+  P.numbers.forEach(function (x) { nums[x[0] + ',' + x[1]] = x[2]; if (x[2] > maxNum) maxNum = x[2]; });
+  var path = [], inPath = {}, dragging = false;
+
+  var grid = document.getElementById('grid'), svg = document.getElementById('svg'), wrap = document.getElementById('wrap');
+  grid.style.gridTemplateColumns = 'repeat(' + N + ', 1fr)';
+  var cellEls = [];
+  for (var i = 0; i < TOTAL; i++) { var d = document.createElement('div'); d.className = 'zc'; grid.appendChild(d); cellEls.push(d); }
+  svg.setAttribute('viewBox', '0 0 ' + N + ' ' + N);
+
+  function key(r, c) { return r + ',' + c; }
+  function passed() { var n = 0; path.forEach(function (p) { if (nums[key(p[0], p[1])]) n++; }); return n; }
+
+  function draw() {
+    cellEls.forEach(function (d) { d.classList.remove('on'); });
+    path.forEach(function (p) { cellEls[p[0] * N + p[1]].classList.add('on'); });
+    var s = '';
+    if (path.length > 1) {
+      s += '<polyline fill="none" stroke="' + GP.T.colors.accent + '" stroke-width="0.42" stroke-linecap="round" stroke-linejoin="round" points="' +
+        path.map(function (p) { return (p[1] + 0.5) + ',' + (p[0] + 0.5); }).join(' ') + '"/>';
+    }
+    if (path.length) {
+      var h = path[path.length - 1];
+      s += '<circle cx="' + (h[1] + 0.5) + '" cy="' + (h[0] + 0.5) + '" r="0.27" fill="' + GP.T.colors.accent + '"/>';
+    }
+    for (var k in nums) {
+      var rc = k.split(','), r = +rc[0], c = +rc[1], reached = inPath[k];
+      s += '<circle cx="' + (c + 0.5) + '" cy="' + (r + 0.5) + '" r="0.3" fill="' + (reached ? '#fff' : '#111') + '" stroke="#111" stroke-width="0.04"/>' +
+        '<text x="' + (c + 0.5) + '" y="' + (r + 0.5) + '" text-anchor="middle" dominant-baseline="central" font-size="0.34" font-weight="700" fill="' + (reached ? '#111' : '#fff') + '" font-family="-apple-system,Segoe UI,Roboto,sans-serif">' + nums[k] + '</text>';
+    }
+    svg.innerHTML = s;
+    document.getElementById('meter').textContent = path.length + ' / ' + TOTAL + ' squares · ' + passed() + ' / ' + (maxNum) + ' numbers';
+  }
+
+  function push(r, c) { path.push([r, c]); inPath[key(r, c)] = true; }
+  function pop() { var p = path.pop(); delete inPath[key(p[0], p[1])]; }
+
+  function check() {
+    if (path.length === TOTAL) {
+      var last = path[path.length - 1];
+      if (nums[key(last[0], last[1])] === maxNum) { dragging = false; g.win(); }
+    }
+  }
+
+  function cellAt(e) {
+    var b = wrap.getBoundingClientRect();
+    var c = Math.floor((e.clientX - b.left) / b.width * N), r = Math.floor((e.clientY - b.top) / b.height * N);
+    if (r < 0 || c < 0 || r >= N || c >= N) return null;
+    return [r, c];
+  }
+
+  function extendTo(cell) {
+    if (!cell || !path.length) return;
+    var last = path[path.length - 1];
+    if (cell[0] === last[0] && cell[1] === last[1]) return;
+    if (path.length > 1) {
+      var prev = path[path.length - 2];
+      if (prev[0] === cell[0] && prev[1] === cell[1]) { pop(); draw(); return; }
+    }
+    if (Math.abs(cell[0] - last[0]) + Math.abs(cell[1] - last[1]) !== 1) return;
+    var k = key(cell[0], cell[1]);
+    if (inPath[k]) return;
+    if (nums[k] && nums[k] !== passed() + 1) return;
+    if (passed() === maxNum) return;                               // already reached the final number
+    push(cell[0], cell[1]); draw(); check();
+  }
+
+  wrap.addEventListener('pointerdown', function (e) {
+    if (!g.started || g.done) return;
+    var cell = cellAt(e); if (!cell) return;
+    var k = key(cell[0], cell[1]);
+    if (!path.length) { if (nums[k] !== 1) { GP.toast('Start on the number 1'); return; } push(cell[0], cell[1]); }
+    else if (inPath[k]) { while (path.length && !(path[path.length-1][0] === cell[0] && path[path.length-1][1] === cell[1])) pop(); }
+    else { extendTo(cell); }
+    dragging = true; draw(); e.preventDefault();
+  });
+  wrap.addEventListener('pointermove', function (e) { if (dragging && !g.done) extendTo(cellAt(e)); });
+  ['pointerup', 'pointercancel', 'pointerleave'].forEach(function (n) { wrap.addEventListener(n, function () { dragging = false; }); });
+
+  document.getElementById('undo').onclick = function () { if (g.done || path.length < 1) return; pop(); draw(); };
+  document.getElementById('clear').onclick = function () { if (g.done) return; while (path.length) pop(); draw(); };
+  draw();
+})();
+</script>
+</body>
+</html>

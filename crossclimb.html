@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Crossclimb</title>
+<link rel="stylesheet" href="assets/shared.css">
+<style>
+  .ladder { display: grid; gap: 8px; max-width: 440px; margin: 0 auto; }
+  .rung { display: flex; align-items: center; gap: 10px; padding: 8px 10px; background: var(--card); border: 1.5px solid var(--line); border-radius: 12px; cursor: pointer; }
+  .rung .tiles { display: flex; gap: 6px; }
+  .tile { width: 42px; height: 46px; display: grid; place-items: center; border-radius: 8px; border: 1.5px solid #cfcdc9; background: #fff; font-size: 22px; font-weight: 700; text-transform: uppercase; }
+  .rung .clue { flex: 1; font-size: 12.5px; line-height: 1.25; color: var(--muted); }
+  .rung.sel { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accentSoft); }
+  .rung.solved { background: var(--goodSoft); border-color: #b4dcc3; cursor: default; }
+  .rung.solved .tile { background: #fff; border-color: #b4dcc3; }
+  .rung.fixed { cursor: default; }
+  .rung.swapsel { border-color: var(--accent); background: var(--accentSoft); }
+  .rung.okpair .tile { border-color: var(--good); }
+  .rung .lockic { color: var(--good); font-size: 16px; width: 18px; text-align: center; }
+  .rung.reorder:not(.fixed) .clue::before { content: "⇅  "; color: var(--accent); font-weight: 700; }
+  .entry { max-width: 440px; margin: 16px auto 0; }
+  .entry .cl { font-size: 15px; font-weight: 600; margin: 0 0 8px; text-align: center; min-height: 20px; }
+  .entry input { width: 100%; height: 50px; border: 1.5px solid var(--line); border-radius: 12px; padding: 0 14px; font-size: 20px; letter-spacing: 6px; text-transform: uppercase; text-align: center; background: #fff; font-weight: 700; }
+  .entry input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accentSoft); }
+  .banner { max-width: 440px; margin: 0 auto 12px; padding: 10px 14px; border-radius: 10px; background: var(--accentSoft); color: var(--accentDark); font-size: 14px; font-weight: 600; text-align: center; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div id="topbar"></div>
+  <main class="main">
+    <p class="instr" id="instr">Solve each clue to fill the ladder.</p>
+    <div id="banner"></div>
+    <div class="ladder" id="ladder"></div>
+    <div class="entry" id="entry">
+      <p class="cl" id="cl"></p>
+      <input id="guess" type="text" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" enterkeyhint="done" aria-label="Your answer">
+    </div>
+  </main>
+</div>
+<script src="assets/theme.js"></script>
+<script src="assets/shared.js"></script>
+<script>
+(function () {
+  var L = GP.T.puzzles.crossclimb.ladder.map(function (x) { return { word: x.word.toUpperCase(), clue: x.clue }; });
+  var LEN = L[0].word.length, n = L.length;
+  var g = GP.init('crossclimb', { onStart: function () { selectRow(firstOpen()); input.focus(); } });
+
+  // Display order: first and last stay put, the middle rows are shuffled (and never start in the right order).
+  function shuffledOrder() {
+    var mid = []; for (var i = 1; i < n - 1; i++) mid.push(i);
+    var tries = 0;
+    do {
+      for (var j = mid.length - 1; j > 0; j--) { var k = Math.floor(Math.random() * (j + 1)); var t = mid[j]; mid[j] = mid[k]; mid[k] = t; }
+      tries++;
+    } while (tries < 20 && mid.every(function (m, idx) { return m === idx + 1; }));
+    return [0].concat(mid, [n - 1]);
+  }
+  var order = shuffledOrder();                    // order[row] = index into L
+  var solved = {};                                // solved[indexInL] = true
+  var sel = null, swapFrom = null, phase = 1;
+  var ladder = document.getElementById('ladder'), input = document.getElementById('guess'), clueEl = document.getElementById('cl');
+  input.maxLength = LEN;
+
+  function firstOpen() { for (var r = 0; r < n; r++) if (!solved[order[r]]) return r; return null; }
+  function diffOne(a, b) { var d = 0; for (var i = 0; i < a.length; i++) if (a[i] !== b[i]) d++; return d === 1; }
+
+  function render() {
+    ladder.innerHTML = '';
+    for (var r = 0; r < n; r++) {
+      var item = L[order[r]], isSolved = !!solved[order[r]];
+      var row = document.createElement('div');
+      row.className = 'rung' + (isSolved ? ' solved' : '') + (phase === 1 && sel === r ? ' sel' : '') +
+        (phase === 2 ? ' reorder' : '') + ((r === 0 || r === n - 1) && phase === 2 ? ' fixed' : '') +
+        (phase === 2 && swapFrom === r ? ' swapsel' : '');
+      row.dataset.r = r;
+      var text = isSolved ? item.word : (phase === 1 && sel === r ? input.value.toUpperCase() : '');
+      var tiles = '<div class="tiles">';
+      for (var i = 0; i < LEN; i++) tiles += '<div class="tile">' + (text[i] || '') + '</div>';
+      tiles += '</div>';
+      row.innerHTML = tiles + '<div class="clue">' + item.clue + '</div>' + (phase === 2 && (r === 0 || r === n - 1) ? '<div class="lockic">🔒</div>' : '');
+      ladder.appendChild(row);
+    }
+    if (phase === 2) {
+      for (r = 0; r < n; r++) {
+        var ok = (r > 0 && diffOne(L[order[r]].word, L[order[r - 1]].word)) || (r < n - 1 && diffOne(L[order[r]].word, L[order[r + 1]].word));
+        if (ok) ladder.children[r].classList.add('okpair');
+      }
+    }
+  }
+
+  function selectRow(r) {
+    if (phase !== 1 || r === null || solved[order[r]]) return;
+    sel = r; input.value = ''; clueEl.textContent = L[order[r]].clue; render();
+  }
+
+  ladder.addEventListener('click', function (e) {
+    if (!g.started || g.done) return;
+    var row = e.target.closest('.rung'); if (!row) return;
+    var r = +row.dataset.r;
+    if (phase === 1) { selectRow(r); input.focus(); return; }
+    if (r === 0 || r === n - 1) { GP.shake(row); return; }
+    if (swapFrom === null) { swapFrom = r; render(); return; }
+    if (swapFrom !== r) { var t = order[r]; order[r] = order[swapFrom]; order[swapFrom] = t; }
+    swapFrom = null; render(); checkLadder();
+  });
+
+  input.addEventListener('input', function () {
+    input.value = input.value.replace(/[^a-zA-Z]/g, '').toUpperCase();
+    if (sel === null) return;
+    if (input.value.length === LEN) {
+      if (input.value === L[order[sel]].word) {
+        solved[order[sel]] = true; input.value = '';
+        var next = firstOpen();
+        if (next === null) { startPhase2(); } else { selectRow(next); }
+      } else {
+        GP.shake(ladder.children[sel]); GP.shake(input);
+        setTimeout(function () { input.value = ''; render(); }, 380);
+      }
+    }
+    render();
+  });
+
+  function startPhase2() {
+    phase = 2; sel = null; input.blur();
+    document.getElementById('entry').style.display = 'none';
+    document.getElementById('instr').textContent = 'Reorder the middle words so each differs from the next by one letter.';
+    document.getElementById('banner').innerHTML = '<div class="banner">All clues solved. Tap two middle rows to swap them.</div>';
+    render(); checkLadder();
+  }
+  function checkLadder() {
+    if (phase !== 2) return;
+    for (var r = 1; r < n; r++) if (!diffOne(L[order[r]].word, L[order[r - 1]].word)) return;
+    g.win();
+  }
+  render();
+})();
+</script>
+</body>
+</html>

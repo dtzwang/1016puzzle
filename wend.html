@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Wend</title>
+<link rel="stylesheet" href="assets/shared.css">
+<style>
+  .theme { text-align: center; margin: 0 0 6px; }
+  .theme small { display: block; font-size: 11.5px; letter-spacing: .6px; text-transform: uppercase; color: var(--muted); font-weight: 700; }
+  .theme b { font-size: 18px; }
+  .spell { height: 34px; text-align: center; font-size: 24px; font-weight: 800; letter-spacing: 4px; color: var(--accentDark); margin: 4px 0; }
+  /* The board is a heart: cells marked "." in theme.js simply don't exist. */
+  .wwrap { position: relative; width: 100%; touch-action: none; }
+  .wgrid { position: absolute; inset: 0; display: grid; z-index: 1; }
+  .wc { position: relative; min-width: 0; min-height: 0; display: grid; place-items: center; }
+  .wc.blank { visibility: hidden; }
+  .wc i { width: 88%; height: 88%; border-radius: 50%; display: grid; place-items: center; font-style: normal; font-weight: 800; line-height: 1;
+    font-size: clamp(10px, 3.5vw, 17px); background: #fff; color: var(--accentDark); border: 1.5px solid #f1c3d1; transition: background .12s, color .12s; }
+  .wc.sel i { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .wc.found i { color: #2a1a20; border-color: transparent; }
+  .wsvg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; }   /* lines sit under the letter circles */
+  .words { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 14px 0 0; }
+  .slot { min-width: 84px; max-width: 100%; padding: 6px 12px; border-radius: 999px; border: 1.5px dashed #d5b7c1; font-weight: 700; font-size: 13px; letter-spacing: 2px; text-align: center; color: #d5b7c1; overflow-wrap: anywhere; }
+  .slot.long { letter-spacing: .5px; font-size: 12px; }
+  .slot.on { border-style: solid; color: #2a1a20; }
+  .wwrap.won .wc i { animation: pulse 1.2s ease-in-out 2; }
+  @keyframes pulse { 50% { transform: scale(1.08); } }
+</style>
+</head>
+<body>
+<div class="app">
+  <div id="topbar"></div>
+  <main class="main">
+    <p class="theme"><small>Today's theme</small><b id="theme"></b></p>
+    <div class="spell" id="spell"></div>
+    <div class="boardbox">
+      <div class="wwrap noselect" id="wrap">
+        <svg class="wsvg" id="svg" xmlns="http://www.w3.org/2000/svg"></svg>
+        <div class="wgrid" id="grid"></div>
+      </div>
+    </div>
+    <div class="words" id="words"></div>
+    <div class="toolbar"><button class="btn ghost" id="clear">Clear selection</button></div>
+  </main>
+</div>
+<script src="assets/theme.js"></script>
+<script src="assets/shared.js"></script>
+<script>
+(function () {
+  var P = GP.T.puzzles.wend, ROWS = P.grid.length, COLS = P.grid[0].length;
+  var g = GP.init('wend');
+  document.getElementById('theme').textContent = P.theme;
+  var targets = P.words.map(function (w) { return w.toUpperCase(); });
+  var found = {};                                 // word -> {cells, color}
+  var cellOwner = {};                             // "r,c" -> colour
+  var path = [], dragging = false;
+
+  var wrap = document.getElementById('wrap'), grid = document.getElementById('grid'), svg = document.getElementById('svg');
+  wrap.style.aspectRatio = COLS + ' / ' + ROWS;
+  grid.style.gridTemplateColumns = 'repeat(' + COLS + ', minmax(0, 1fr))';
+  grid.style.gridTemplateRows = 'repeat(' + ROWS + ', minmax(0, 1fr))';
+  svg.setAttribute('viewBox', '0 0 ' + COLS + ' ' + ROWS);          // 1 unit = 1 cell
+  var cellEls = {};
+  function isCell(r, c) { return r >= 0 && c >= 0 && r < ROWS && c < COLS && P.grid[r][c] !== '.'; }
+  for (var r = 0; r < ROWS; r++) for (var c = 0; c < COLS; c++) {
+    var d = document.createElement('div'); d.className = 'wc';
+    if (P.grid[r][c] === '.') d.classList.add('blank'); else { d.innerHTML = '<i>' + P.grid[r][c] + '</i>'; cellEls[r + ',' + c] = d; }
+    grid.appendChild(d);
+  }
+  var wordsBox = document.getElementById('words'), slots = {};
+  targets.forEach(function (w) { var s = document.createElement('div'); s.className = 'slot' + (w.length > 12 ? ' long' : ''); s.textContent = w.replace(/./g, '•'); wordsBox.appendChild(s); slots[w] = s; });
+
+  function key(p) { return p[0] + ',' + p[1]; }
+  function spelled() { return path.map(function (p) { return P.grid[p[0]][p[1]]; }).join(''); }
+  function centre(p) { return [p[1] + 0.5, p[0] + 0.5]; }
+  function pts(cells) { return cells.map(function (p) { var q = centre(p); return q[0] + ',' + q[1]; }).join(' '); }
+
+  function draw() {
+    var s = '';
+    Object.keys(found).forEach(function (w) {
+      var f = found[w]; if (f.cells.length < 2) return;
+      s += '<polyline fill="none" stroke="' + f.color + '" stroke-width="0.26" stroke-linecap="round" stroke-linejoin="round" points="' + pts(f.cells) + '"/>';
+    });
+    if (path.length > 1) s += '<polyline fill="none" stroke="' + GP.T.colors.accent + '" stroke-width="0.26" stroke-linecap="round" stroke-linejoin="round" points="' + pts(path) + '"/>';
+    svg.innerHTML = s;
+    Object.keys(cellEls).forEach(function (k) {
+      var el = cellEls[k], i = el.firstChild;
+      var sel = path.some(function (p) { return key(p) === k; });
+      el.classList.toggle('sel', sel);
+      el.classList.toggle('found', !!cellOwner[k]);
+      i.style.background = cellOwner[k] && !sel ? cellOwner[k] : '';
+    });
+    document.getElementById('spell').textContent = spelled();
+  }
+
+  function cellAt(e) {
+    var b = wrap.getBoundingClientRect();
+    var x = (e.clientX - b.left) / b.width * COLS, y = (e.clientY - b.top) / b.height * ROWS;
+    var c = Math.floor(x), r = Math.floor(y);
+    if (!isCell(r, c)) return null;
+    if (Math.hypot(x - (c + 0.5), y - (r + 0.5)) > 0.5) return null;   // stay near the middle of a letter
+    return [r, c];
+  }
+
+  function addCell(cell) {
+    if (!cell || cellOwner[key(cell)]) return;
+    if (!path.length) { path.push(cell); draw(); return; }
+    var last = path[path.length - 1];
+    if (last[0] === cell[0] && last[1] === cell[1]) return;
+    if (path.length > 1) { var pv = path[path.length - 2]; if (pv[0] === cell[0] && pv[1] === cell[1]) { path.pop(); draw(); return; } }
+    if (Math.abs(last[0] - cell[0]) + Math.abs(last[1] - cell[1]) !== 1) return;     // up, down, left or right only: no diagonals
+    if (path.some(function (p) { return p[0] === cell[0] && p[1] === cell[1]; })) return;
+    path.push(cell); draw();
+  }
+
+  function submit() {
+    var w = spelled();
+    if (path.length >= 2 && targets.indexOf(w) >= 0 && !found[w]) {
+      var color = P.colors[Object.keys(found).length % P.colors.length];
+      found[w] = { cells: path.slice(), color: color };
+      path.forEach(function (p) { cellOwner[key(p)] = color; });
+      slots[w].textContent = w; slots[w].classList.add('on'); slots[w].style.background = color; slots[w].style.borderColor = 'transparent';
+      path = []; draw();
+      if (Object.keys(found).length === targets.length) {
+        wrap.classList.add('won');
+        g.win(null, 1400);
+      }
+    } else {
+      if (path.length >= 2) GP.shake(wrap);
+      path = []; draw();
+    }
+  }
+
+  wrap.addEventListener('pointerdown', function (e) {
+    if (!g.started || g.done) return;
+    path = []; dragging = true; addCell(cellAt(e)); e.preventDefault();
+  });
+  wrap.addEventListener('pointermove', function (e) { if (dragging) addCell(cellAt(e)); });
+  function up() { if (!dragging) return; dragging = false; submit(); }
+  wrap.addEventListener('pointerup', up);
+  wrap.addEventListener('pointercancel', function () { dragging = false; path = []; draw(); });
+  document.getElementById('clear').onclick = function () { path = []; draw(); };
+  draw();
+})();
+</script>
+</body>
+</html>

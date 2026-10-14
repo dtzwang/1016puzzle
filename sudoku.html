@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Maxi Sudoku</title>
+<link rel="stylesheet" href="assets/shared.css">
+<style>
+  .sgrid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); grid-template-rows: repeat(12, minmax(0, 1fr));
+    width: 100%; aspect-ratio: 1; border: 2.5px solid #2a1a20; border-radius: 6px; overflow: hidden; background: #fff; }
+  .sc { position: relative; min-width: 0; min-height: 0; overflow: hidden; display: grid; place-items: center; line-height: 1;
+    font-size: clamp(13px, 4.6vw, 21px); font-weight: 500; border: 1px solid #e4d9dc; cursor: pointer; color: var(--accentDark); }
+  .sc.given { color: #2a1a20; font-weight: 700; background: #f7f0f2; }
+  .sc.r-edge { border-right: 2.5px solid #2a1a20; }
+  .sc.b-edge { border-bottom: 2.5px solid #2a1a20; }
+  .sc.peer { background: var(--accentSoft); }
+  .sc.same { background: #f8cfdc; }
+  .sc.sel { background: #f2a9c0; box-shadow: inset 0 0 0 2px var(--accent); }
+  .sc.bad { color: var(--bad); background: var(--badSoft); }
+  .pad { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; max-width: 440px; margin: 14px auto 0; }
+  .pad button { height: 48px; border-radius: 12px; border: 1px solid var(--line); background: #fff; font-size: 21px; font-weight: 600; color: var(--accentDark); }
+  .pad button:active { background: var(--accentSoft); }
+  .pad button.er { font-size: 18px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="app">
+  <div id="topbar"></div>
+  <main class="main">
+    <p class="instr">Fill the grid with 1–9 and A, B, C. Every row, column and 3×4 box holds each symbol once.</p>
+    <div class="boardbox"><div class="sgrid noselect" id="board"></div></div>
+    <div class="pad" id="pad"></div>
+  </main>
+</div>
+<script src="assets/theme.js"></script>
+<script src="assets/shared.js"></script>
+<script>
+(function () {
+  var puz = GP.T.puzzles.sudoku.puzzle, N = 12, BH = 3, BW = 4, SYM = ' 123456789ABC';
+  var g = GP.init('sudoku');
+  var v = puz.map(function (r) { return r.slice(); }), sel = null, cells = [];
+  var board = document.getElementById('board');
+  for (var r = 0; r < N; r++) for (var c = 0; c < N; c++) {
+    var d = document.createElement('div'); d.dataset.r = r; d.dataset.c = c;
+    cells[r * N + c] = d; board.appendChild(d);
+  }
+  var pad = document.getElementById('pad');
+  for (var n = 1; n <= 12; n++) { var b = document.createElement('button'); b.textContent = SYM[n]; b.dataset.n = n; pad.appendChild(b); }
+  var er = document.createElement('button'); er.className = 'er'; er.textContent = '⌫'; er.dataset.n = 0; pad.appendChild(er);
+
+  function boxOf(r, c) { return [Math.floor(r / BH), Math.floor(c / BW)]; }
+  function bad() {
+    var out = {};
+    for (var r = 0; r < N; r++) for (var c = 0; c < N; c++) {
+      var x = v[r][c]; if (!x) continue;
+      for (var r2 = 0; r2 < N; r2++) for (var c2 = 0; c2 < N; c2++) {
+        if (r === r2 && c === c2 || v[r2][c2] !== x) continue;
+        var b1 = boxOf(r, c), b2 = boxOf(r2, c2);
+        if (r === r2 || c === c2 || (b1[0] === b2[0] && b1[1] === b2[1])) out[r * N + c] = true;
+      }
+    }
+    return out;
+  }
+  function render() {
+    var errs = bad(), full = true;
+    for (var r = 0; r < N; r++) for (var c = 0; c < N; c++) {
+      var d = cells[r * N + c], x = v[r][c], cls = 'sc';
+      if (puz[r][c]) cls += ' given';
+      if (c % BW === BW - 1 && c !== N - 1) cls += ' r-edge';
+      if (r % BH === BH - 1 && r !== N - 1) cls += ' b-edge';
+      if (sel) {
+        var sr = sel[0], sc = sel[1], b1 = boxOf(r, c), b2 = boxOf(sr, sc);
+        if (r === sr && c === sc) cls += ' sel';
+        else if (v[sr][sc] && x === v[sr][sc]) cls += ' same';
+        else if (r === sr || c === sc || (b1[0] === b2[0] && b1[1] === b2[1])) cls += ' peer';
+      }
+      if (errs[r * N + c]) cls += ' bad';
+      d.className = cls; d.textContent = x ? SYM[x] : ''; if (!x) full = false;
+    }
+    if (full && !Object.keys(errs).length) g.win();
+  }
+  function setVal(n) {
+    if (!sel || g.done || !g.started) return;
+    if (puz[sel[0]][sel[1]]) { GP.shake(cells[sel[0] * N + sel[1]]); return; }
+    v[sel[0]][sel[1]] = n; render();
+  }
+  board.addEventListener('click', function (e) {
+    var d = e.target.closest('.sc'); if (!d || !g.started) return;
+    sel = [+d.dataset.r, +d.dataset.c]; render();
+  });
+  pad.addEventListener('click', function (e) { var b = e.target.closest('button'); if (b) setVal(+b.dataset.n); });
+  document.addEventListener('keydown', function (e) {
+    var k = e.key.toUpperCase(), i = 'ABC'.indexOf(k);
+    if (k.length === 1 && k >= '1' && k <= '9') setVal(+k);
+    else if (k.length === 1 && i >= 0) setVal(10 + i);
+    else if (e.key === 'Backspace' || e.key === 'Delete' || e.key === '0') setVal(0);
+    else if (sel && e.key.indexOf('Arrow') === 0) {
+      var dr = e.key === 'ArrowDown' ? 1 : e.key === 'ArrowUp' ? -1 : 0, dc = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+      sel = [Math.max(0, Math.min(N - 1, sel[0] + dr)), Math.max(0, Math.min(N - 1, sel[1] + dc))]; render(); e.preventDefault();
+    }
+  });
+  render();
+})();
+</script>
+</body>
+</html>

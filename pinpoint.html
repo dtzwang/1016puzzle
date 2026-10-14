@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Pinpoint</title>
+<link rel="stylesheet" href="assets/shared.css">
+<style>
+  .round { text-align: center; font-size: 13px; font-weight: 600; color: var(--muted); margin: 0 0 10px; letter-spacing: .3px; text-transform: uppercase; }
+  .cardlist { display: grid; gap: 8px; max-width: 440px; margin: 0 auto; }
+  .pc { height: 54px; display: flex; align-items: center; justify-content: center; border-radius: 12px; border: 1.5px dashed #cfcdc9; color: #b5b3ae; font-weight: 600; background: rgba(255,255,255,.5); }
+  .pc.show { background: #fff; border: 1.5px solid var(--line); color: var(--text); font-size: 19px; animation: pop .25s ease; }
+  .pc.hit { background: var(--goodSoft); border-color: #b4dcc3; }
+  @keyframes pop { from { transform: scale(.94); opacity: 0 } to { transform: none; opacity: 1 } }
+  .guessbox { max-width: 440px; margin: 16px auto 0; display: flex; gap: 8px; }
+  .guessbox input { flex: 1; height: 50px; border: 1.5px solid var(--line); border-radius: 12px; padding: 0 14px; font-size: 17px; background: #fff; }
+  .guessbox input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accentSoft); }
+  .guessbox .btn { padding: 0 20px; }
+  .prev { max-width: 440px; margin: 12px auto 0; display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; }
+  .chip { padding: 4px 12px; border-radius: 999px; background: var(--badSoft); color: var(--bad); font-size: 13px; font-weight: 600; text-decoration: line-through; }
+  .result { max-width: 440px; margin: 16px auto 0; padding: 14px; border-radius: 12px; text-align: center; font-size: 15px; line-height: 1.4; }
+  .result.win { background: var(--goodSoft); color: var(--good); }
+  .result.lose { background: var(--badSoft); color: var(--bad); }
+  .result .btn { margin-top: 12px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div id="topbar"></div>
+  <main class="main">
+    <p class="instr">Guess what these words have in common. Each wrong guess reveals another word.</p>
+    <p class="round" id="round"></p>
+    <div class="cardlist" id="cards"></div>
+    <div class="guessbox" id="gbox"><input id="guess" type="text" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="Type your guess" enterkeyhint="go"><button class="btn" id="go">Guess</button></div>
+    <div class="prev" id="prev"></div>
+    <div id="result"></div>
+  </main>
+</div>
+<script src="assets/theme.js"></script>
+<script src="assets/shared.js"></script>
+<script>
+(function () {
+  var ROUNDS = GP.T.puzzles.pinpoint;
+  var g = GP.init('pinpoint');
+  var ri = 0, revealed = 1, wrong = [], over = false, scores = [];
+  var cards = document.getElementById('cards'), input = document.getElementById('guess'), prev = document.getElementById('prev'),
+      result = document.getElementById('result'), gbox = document.getElementById('gbox');
+  function norm(s) { return s.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim(); }
+
+  function render() {
+    var R = ROUNDS[ri];
+    document.getElementById('round').textContent = ROUNDS.length > 1 ? 'Puzzle ' + (ri + 1) + ' of ' + ROUNDS.length : '';
+    cards.innerHTML = '';
+    R.words.forEach(function (w, i) {
+      var d = document.createElement('div');
+      d.className = 'pc' + (i < revealed ? ' show' : '') + (over && i < revealed ? ' hit' : '');
+      d.textContent = i < revealed ? w : (i + 1);
+      cards.appendChild(d);
+    });
+    prev.innerHTML = wrong.map(function (w) { return '<span class="chip">' + w.replace(/</g, '&lt;') + '</span>'; }).join('');
+    gbox.style.display = over ? 'none' : 'flex';
+  }
+
+  function finishRound(won) {
+    over = true; scores.push(won ? revealed : null);
+    var R = ROUNDS[ri], last = ri === ROUNDS.length - 1;
+    render();
+    result.innerHTML = '<div class="result ' + (won ? 'win' : 'lose') + '">' +
+      (won ? '<b>Correct!</b> ' + R.answer + ' · solved with ' + revealed + (revealed === 1 ? ' clue' : ' clues')
+           : 'Out of clues. The answer was <b>' + R.answer + '</b>') +
+      '<br><button class="btn" id="nextbtn">' + (last ? 'See my result' : 'Next puzzle') + '</button></div>';
+    document.getElementById('nextbtn').onclick = function () {
+      if (last) {
+        var ok = scores.filter(function (s) { return s !== null; }).length;
+        result.innerHTML = '';
+        g.win(ROUNDS.length > 1 ? ok + ' of ' + ROUNDS.length + ' categories found' : null);
+      } else { ri++; revealed = 1; wrong = []; over = false; result.innerHTML = ''; input.value = ''; render(); input.focus(); }
+    };
+  }
+
+  function submit() {
+    if (!g.started || g.done || over) return;
+    var v = norm(input.value); if (!v) return;
+    var R = ROUNDS[ri];
+    var accepted = [R.answer].concat(R.accept || []).map(norm);
+    var frag = (R.contains || []).some(function (f) { return v.indexOf(norm(f)) >= 0; });
+    if (accepted.indexOf(v) >= 0 || frag) { finishRound(true); return; }
+    wrong.push(input.value.trim()); input.value = ''; GP.shake(input);
+    if (revealed >= R.words.length) { finishRound(false); } else { revealed++; render(); }
+  }
+  document.getElementById('go').onclick = submit;
+  input.addEventListener('keydown', function (e) { if (e.key === 'Enter') submit(); });
+  render();
+})();
+</script>
+</body>
+</html>

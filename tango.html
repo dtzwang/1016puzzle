@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Tango</title>
+<link rel="stylesheet" href="assets/shared.css">
+<style>
+  .tgrid { display: grid; width: 100%; aspect-ratio: 1; border: 2px solid #111; border-radius: 8px; background: #fff; position: relative; }
+  .tc { position: relative; display: grid; place-items: center; border: 1px solid #d6d4d0; background: #fbfaf8; cursor: pointer; }
+  .tc { min-width: 0; min-height: 0; overflow: visible; }
+  .tc svg { position: absolute; left: 19%; top: 19%; width: 62%; height: 62%; }
+  .tc.sun svg { color: #e0456f; }      /* value 0 = heart */
+  .tc.moon svg { color: #e0a82e; }     /* value 1 = star  */
+  .tc.lock { background: #ecebe7; cursor: default; }
+  .tc.err { background: var(--badSoft); }
+  .tc.err svg { color: var(--bad); }
+  .mk { position: absolute; z-index: 3; width: 24px; height: 24px; margin: -12px 0 0 -12px; border-radius: 50%; background: #fff;
+    border: 1.5px solid #8a8883; display: grid; place-items: center; font-size: 15px; font-weight: 700; line-height: 1; color: #333; pointer-events: none; }
+  .mk.right { top: 50%; left: 100%; }
+  .mk.bottom { top: 100%; left: 50%; }
+  .mk.badc { border-color: var(--bad); color: var(--bad); background: var(--badSoft); }
+</style>
+</head>
+<body>
+<div class="app">
+  <div id="topbar"></div>
+  <main class="main">
+    <p class="instr">Equal hearts and stars in every row and column. No more than two in a row. <b>=</b> same, <b>×</b> different.</p>
+    <div class="boardbox"><div id="board" class="tgrid noselect"></div></div>
+    <div class="toolbar"><button class="btn ghost" id="undo">Undo</button><button class="btn ghost" id="clear">Clear</button></div>
+  </main>
+</div>
+<script src="assets/theme.js"></script>
+<script src="assets/shared.js"></script>
+<script>
+(function () {
+  var P = GP.T.puzzles.tango, N = 6;
+  var g = GP.init('tango');
+  var grid = [], lock = [], hist = [], cells = [], marks = [];
+  for (var r = 0; r < N; r++) { grid.push(new Array(N).fill(-1)); lock.push(new Array(N).fill(false)); }
+  P.givens.forEach(function (x) { grid[x[0]][x[1]] = x[2]; lock[x[0]][x[1]] = true; });
+
+  var board = document.getElementById('board');
+  board.style.gridTemplateColumns = 'repeat(' + N + ', minmax(0, 1fr))';
+  board.style.gridTemplateRows = 'repeat(' + N + ', minmax(0, 1fr))';
+  for (r = 0; r < N; r++) for (var c = 0; c < N; c++) {
+    var d = document.createElement('div'); d.className = 'tc'; d.dataset.r = r; d.dataset.c = c;
+    board.appendChild(d); cells[r * N + c] = d;
+  }
+  P.cons.forEach(function (k) {
+    var horizontal = k[0] === k[2];
+    var anchor = cells[k[0] * N + k[1]];
+    var m = document.createElement('div');
+    m.className = 'mk ' + (horizontal ? 'right' : 'bottom');
+    m.textContent = k[4] === '=' ? '=' : '×';
+    anchor.appendChild(m);
+    marks.push({ el: m, k: k });
+  });
+
+  function errors() {
+    var bad = {};
+    function flag(r, c) { bad[r * N + c] = true; }
+    for (var i = 0; i < N; i++) {
+      [0, 1].forEach(function (dir) {                       // dir 0 = row i, dir 1 = column i
+        var line = [], count = [0, 0];
+        for (var j = 0; j < N; j++) { var v = dir ? grid[j][i] : grid[i][j]; line.push(v); if (v >= 0) count[v]++; }
+        for (j = 0; j < N - 2; j++) if (line[j] >= 0 && line[j] === line[j+1] && line[j] === line[j+2])
+          for (var t = 0; t < 3; t++) dir ? flag(j + t, i) : flag(i, j + t);
+        [0, 1].forEach(function (val) {
+          if (count[val] > N / 2) for (var j2 = 0; j2 < N; j2++) if (line[j2] === val) dir ? flag(j2, i) : flag(i, j2);
+        });
+      });
+    }
+    var badCons = [];
+    P.cons.forEach(function (k, idx) {
+      var a = grid[k[0]][k[1]], b = grid[k[2]][k[3]];
+      if (a < 0 || b < 0) return;
+      if ((k[4] === '=' && a !== b) || (k[4] === 'x' && a === b)) { flag(k[0], k[1]); flag(k[2], k[3]); badCons.push(idx); }
+    });
+    return { bad: bad, badCons: badCons };
+  }
+
+  function render() {
+    var e = errors(), filled = 0;
+    for (var r = 0; r < N; r++) for (var c = 0; c < N; c++) {
+      var d = cells[r * N + c], v = grid[r][c];
+      d.className = 'tc' + (v === 0 ? ' sun' : v === 1 ? ' moon' : '') + (lock[r][c] ? ' lock' : '') + (e.bad[r * N + c] ? ' err' : '');
+      var svg = v === 0 ? GP.HEART : v === 1 ? GP.STAR : '';
+      var holder = d.querySelector('.ic');
+      if (!holder) { holder = document.createElement('span'); holder.className = 'ic'; holder.style.display = 'contents'; d.insertBefore(holder, d.firstChild); }
+      holder.innerHTML = svg;
+      if (v >= 0) filled++;
+    }
+    marks.forEach(function (m, idx) { m.el.classList.toggle('badc', e.badCons.indexOf(idx) >= 0); });
+    if (filled === N * N && Object.keys(e.bad).length === 0) g.win();
+  }
+
+  board.addEventListener('click', function (ev) {
+    if (!g.started || g.done) return;
+    var d = ev.target.closest('.tc'); if (!d) return;
+    var r = +d.dataset.r, c = +d.dataset.c;
+    if (lock[r][c]) { GP.shake(d); return; }
+    hist.push(JSON.stringify(grid));
+    grid[r][c] = grid[r][c] === -1 ? 0 : grid[r][c] === 0 ? 1 : -1;
+    render();
+  });
+  document.getElementById('undo').onclick = function () { if (g.done || !hist.length) return; grid = JSON.parse(hist.pop()); render(); };
+  document.getElementById('clear').onclick = function () {
+    if (g.done) return; hist.push(JSON.stringify(grid));
+    for (var r = 0; r < N; r++) for (var c = 0; c < N; c++) if (!lock[r][c]) grid[r][c] = -1;
+    render();
+  };
+  render();
+})();
+</script>
+</body>
+</html>
